@@ -1,0 +1,239 @@
+---
+title: "cleaning_description"
+author: "Marialexia Alfano"
+date: "October 23, 2017"
+output:
+  word_document: default
+  html_document: default
+---
+```{r global_options}
+knitr::opts_chunk$set(eval = FALSE, message = FALSE, warning = FALSE)
+```
+
+
+```{r}
+clean_yearly_person_file <- function(year) {
+  # 1. Read data in.
+  person_file <- paste0("data-raw/yearly_person_data/person_", year, ".csv")
+  df <- readr::read_csv(person_file)
+```
+
+Comment #1: This step introduces the framework of the function we are going to create which will be used to clean all the data in the end. We set the function name "clean_yearly_person_file" and the argument "year". Then we are reading in the data from the folder "yearly_person_data" where all the individual yearly datasets are saved. Combining the terms "person_" and "year" allows the files to be read in as they are saved (i.e. person_1999.csv), so readr can be used to load in "person_file" and create the "df" dataframe. This has all of the yearly_person data from the .csv files, combined. 
+
+```{r}
+# 2. Convert all column names to lowercase.
+  colnames(df) <- tolower(colnames(df))
+  df <- df %>%
+
+```
+
+Comment #2: this step here changes the column names from uppercase to lowercase. The variables in the FARS dataset are labelled in uppercase and by changing these to lowercase, it makes it alot easier to work go ahead and select and clean the data without having to worry about switching to uppercase to refer to the variables that we need moving forward. The last line is setting up to edit the df object using piping. 
+
+```{r}
+# 3. Limit variables.
+    dplyr::select(st_case, veh_no, per_no, state, per_typ, lag_hrs,lag_mins,inj_sev, age, alc_res, contains("drugres"), sex) %>%
+
+```
+
+Comment #3: This step is selecting and limiting the dataframe to include these certain variables, using the select function in dplyr. st_case, veh_no, and per_no are all unique IDs where as the other variables contain codified values, which will be called upon in further cleaning steps. These variables represent the data that we need to use in further cleaning steps to properly limit the dataframe in order to replicate the Brady and Li analysis. 
+
+```{r}
+# 4. Limit to relevant `per_typ` and `inj_sev` values, then remove those variables.
+    dplyr::filter(per_typ == 1 & inj_sev == 4) %>%
+    dplyr::select(-per_typ, -inj_sev) %>%
+```
+
+Comment #4: The piping of more dplyr functions continues in this step. More specifically the filter function is used to employ some of the constraints mentioned in the study such as, we want only drivers. Using the logic "equals" or ==, we can filter to keep just the observations for which per_type is 1. Added to this constraint is also the fact that we want just the observations that are not only "drivers" but are also fatal crashes (i.e. inj_sev == 4). With the & between them, we are requiring both these to be true in order for an observation to remain in the dataframe. Once we've used these variables to constrain the dataframe to the observations we want, we no longer need the values within them. We can get rid of these columns by selecting them "out" by using the "-" before the column name. 
+
+```{r}
+ # 5. Create a `unique_id`. Note: to be unique, `year` needs to be pasted on.
+    tidyr::unite(unique_id, st_case, veh_no, per_no) %>%
+    dplyr::mutate(year = year,
+                  unique_id = paste(unique_id, year, sep = "_")) %>%
+```
+
+Comment #5: This step is using the variables mentioned earlier that are unique identifiers within the dataset to create a "unified" unique ID column. First the unite function within tidyr is used to combine the st_case, veh_no, and per_no variables into the space of one column. Then the mutate funciton from dplyr is first used to create a column for the year each observation (driver fatality) occurred, then it is also used to paste the newly combined unique_ids together with the year within the new column "unique_id". The sep = "_" indicates an "_" be used as a separation between the unique IDs, and the year which are now combined into one result within a single column. 
+
+```{r}
+# 6. Limit to study states and then remove the `state` variable.
+    dplyr::filter(state %in% c(6,
+                               15,
+                               17,
+                               33,
+                               44,
+                               54)) %>%
+    dplyr::select(-state) %>%
+```
+
+Comment #6: This next step is a continuation of employing the constraints on the dataset that will be necessary to reproduce the Brady and Li analyses. It was noted in the article that only certain states have consistent drug testing data available over the study period and so the dataframe must be confined to these states. The filter function is used to filter the observations to ones that occurred within (aka %in%) the states above (which are codified). The numbers 6, 15, 17, 33, 44, and 54 represent California, Hawaii, Illinois, New Hampshire, Rhode Island, and West Virginia, respectively. Once we use the state variable to further narrow down the observations we want to include in the analysis, we can get rid of the variable by selecting it out again "-state".  
+
+```{r}
+# 7. Convert `sex` to a factor with levels "Male" and "Female".
+    dplyr::mutate(sex = ifelse(sex == 9, NA, sex),
+                  sex = factor(sex, levels = c(1, 2),
+                               labels = c("Male", "Female"))) %>%
+```
+
+Comment #7: The majority of the values within the variables in this dataset have been codified. So categorical values such as sex (i.e. male/female) have been assigned numbers instead. The goal in this step is to convert the codified version back to the typical male/female level. The mutate function is used to make these changes to the "sex" variable column. The ifelse statement determines that where sex == 9, it will be considered an NA, since 9 is the codified value for sex = "unknown". The factor statement following that changes the levels in the order 1, 2 to be factors labeled "Male" and "Female", in that same order (i.e. 1 = Male, 2 = Female). This will create a column for sex that shows for each observation -- "male, female, male, male"" etc. instead of "1, 2, 1, 1".  
+
+```{r}
+# 8. Use measured alcohol blood level to create `Alcohol` (logical for whether
+    # alcohol was present). Then remove the `alc_res` variable.
+    dplyr::mutate(alc_res = ifelse(alc_res > 94, NA, alc_res / 10),
+                  Alcohol = alc_res >= 0.01) %>%
+    dplyr::select(-alc_res) %>%
+```
+
+Comment #8: This step uses the data from the variable alc_res, which are alcohol test results, to create a logical output for whether or not the driver had alcohol in their system. The mutate function is used to make the changes to the alc_res variable/column. The ifelse statement here is saying that if the value of alc_res is greater than 94, it is considered NA because any of the numbers higher than "94", are coded to represent situations such as "unknown test result". The next statement says that if alc_res is any number greater than or equal to 0.01, then the output will be "Alcohol" in the column, not the numerical value. Once these changes are made using this variable, it can be removed using the select out (-alc_res) because it is no longer needed as an column on it's own within the dataframe for the analyses.  
+
+```{r}
+# 9. Specify missing values for the lag minutes.
+    dplyr::mutate(lag_mins = ifelse(lag_mins == 99, NA, lag_mins))
+```
+
+Comment #9: This step uses mutate to change the lag_mins variable. More specifically, since the values within this variable were codified, the ifelse statement is saying that if the lag_mins are equal to 99, the number "99" should be replaced with an NA, which is what the 99 represents in this case. 
+
+```{r}
+# 10. Save lag hours coded as missing as `NA`.
+  if(year <= 2008){
+    df <- df %>%
+      dplyr::mutate(lag_hrs = ifelse(lag_hrs %in% c(99, 999), NA, lag_hrs))
+  } else {
+    df <- df %>%
+      dplyr::mutate(lag_hrs = ifelse(lag_hrs == 999, NA, lag_hrs))
+  }
+```
+
+Comment #10: This step results in a similar outcome to the previous step, but this time it's a little different because the system for coding the information changed over the study period for lag_hrs. Up until 2008, the lag_hrs values that were "unknown" were recorded as 99 and then after 2008, the "unknown" values were recorded as 999. Therefore, when mutating this variable, it must be specified to mutate the 99 values to NA values if the year is <= 2008, but otherwise, as the second statement indicates, if lag_hrs is equal to 999, that value should be mutated to an NA value. 
+
+```{r}
+# 11. Limit to deaths within an hour of the accident then remove those variables.
+  df <- df %>%
+    dplyr::filter((lag_hrs < 1) | (lag_hrs == 1 & lag_mins == 0)) %>%
+    dplyr::select(-lag_hrs, -lag_mins)
+```
+
+Comment #11: Once we've specified what codified values should be changed to NA values, we can move forward with using the lag_hrs and lag_mins to further limit our observations to drivers that strictly died within an hour of the crash. This step filters the observations to include only lag_hrs that are less than 1 or, if the lag_hrs equal 1, it can't be more than 1 so therefore the lag_mins would also have to equal 0. Once we filter the observations to fit these constraints, we can go ahead and remove the lag_hrs and lag_mins using the select out (-lag_hrs, -lag_mins) because used the variable to select what we need and we no longer need those values in our dataframe.
+
+```{r}
+# 12. Save age values coded as missing as `NA`.
+  if(year <= 2008){
+    df <- df %>%
+      dplyr::mutate(age = ifelse(age == 99, NA, age))
+  } else {
+    df <- df %>%
+      dplyr::mutate(age = ifelse(age %in% c(998, 999), NA, age))
+  }
+```
+
+Comment #12: What is happening here with the age variable is similar to what was happening before with the NA values in lag_hrs versus lag_mins as a result of the change of the coding system over the study period. Up until 2008, the age values that were "unknown" were recorded as 99 and then after 2008, the "unknown" values were recorded as 999. Therefore, when mutating this variable, it must be specified to mutate the 99 values to NA values if the year is <= 2008, but otherwise, as the second statement indicates, if age is equal to 999, that value should be mutated to an NA value. 
+
+```{r}
+# 13. Use age to create age categories and then remove `age` variable.
+  df <- df %>%
+    dplyr::mutate(agecat = cut(age, breaks = c(0, 25, 45, 65, 1000),
+                               labels = c("< 25 years",
+                                          "25--44 years",
+                                          "45--64 years",
+                                          "65 years +"),
+                               include.lowest = TRUE, right = FALSE)) %>%
+    dplyr::select(-age)
+```
+
+Comment #13: This step is using the age variable to create a new column that has the age data broken down into categories. The mutate function is used to create a new column "agecat" which uses the age data cut into 5 different breaks in the values. Breaking at 0, 25, 45, 65, and 1000 allows for 4 categories (i.e. 25 or younger, 25-44, 45-64, and 65 or more). Whichever category each observation falls within is the category that is presented in the agecat column. Once we've use the age variable to create this agecat column, we no longer need the values in the age column so we can get rid of the column by selecting out (-age).
+
+```{r}
+# 14. Gather all the columns with different drug listings (i.e., `drugres1`,
+  # `drugres2`, `drugres3`). Convert from the numeric code listings to
+  # drug categories.
+  gathered_df <- df %>%
+    tidyr::gather(drug_number, drug_type_raw, contains("drugres")) %>%
+    dplyr::mutate(drug_type = ifelse(drug_type_raw %in% 100:295,
+                                     "Narcotic", NA),
+                  drug_type = ifelse(drug_type_raw %in% 300:395,
+                                     "Depressant", drug_type),
+                  drug_type = ifelse(drug_type_raw %in% 400:495,
+                                     "Stimulant", drug_type),
+                  drug_type = ifelse(drug_type_raw %in% 600:695,
+                                     "Cannabinoid", drug_type),
+                  drug_type = ifelse(drug_type_raw %in% c(500:595, 700:996),
+                                     "Other", drug_type),
+                  drug_type = ifelse(drug_type_raw == 1,
+                                     "None", drug_type),
+                  drug_type = factor(drug_type)) %>%
+    dplyr::select(-drug_type_raw, -drug_number) %>%
+```
+
+Comment #14: The dataframe we are working with at this point still has several different columns for drug_res (i.e. drug_res1, drug_res2 etc.). This step is about gathering those columns together into one column, "drug_type" and creating a df that indicates this gathering (i.e. gathered_df). First a "drug_number" column is created to combine all of the different codified outcomes "drug_type_raw", which contains the results from all the drug_res columns, into one. But we really only want to consider certain drugs that were tested for (i.e. narcotics, depressants, stimulants, cannabinoids). The mutate function here is then used to create the final column, "drug_type" and the ifelse statements bring in the specific data we are looking for in this analysis by saying any result within (%in%) drug_type_raw that is the codified value 600:695, should be written in as "Cannabinoid" in the drug_type column. The drug_type_raw and drug_number were mainly a scaffold to help create the final drug_type variable and we no longer need all those values, so we can get rid of them using the select out (-drug_type_raw, -drug_number). 
+
+```{r}
+# 15. Filter out any observations where both alcohol and drug data is missing.
+    dplyr::filter(!(is.na(Alcohol) & is.na(drug_type)))
+```
+
+Comment #15: This step is looking to apply yet another constraint that was detailed in the Brady and Li analysis. They selected for observations that had drug data available and filtered out any observations that didn't have this data available. This step is employing this constraint by filtering out missing or NA data related to alcohol and drug testing. 
+
+```{r}
+# 16. Create a subset with only individuals with at least one non-missing
+  # listing for drugs. (Write a sentence or two for each step in this pipe chain.)
+  non_missing_drugs <- gathered_df %>%
+    filter(!is.na(drug_type)) %>%
+    group_by(unique_id, drug_type) %>%
+    summarize(has_drug = TRUE) %>%
+    ungroup() %>%
+    mutate(row_num = 1:n()) %>%
+    spread(drug_type, has_drug, fill = FALSE) %>%
+    select(-row_num)
+```
+
+Comment #16: 
+*Pipe 1*: Defines object non_missing_drugs which references the gathered_df defined object 
+*Pipe 2*: Filters out any values within drug_type variable in gathered_df that are NA 
+*Pipe 3*: The group_by function groups the observations by drug_type and unique_id 
+*Pipe 4*: Summarize function creates has_drug variable that is TRUE for all observations. We filtered out NA values, and grouped by unique_id AND drug_type (which was originally filtered to include observations where alcohol/drug result data were available - step#15)
+*Pipe 5*: ungroup unique_id and drug_type so that the has_drug variable can be used in conjunction with the other variables in the dataframe. 
+*Pipe 6*: this mutate function provies row numbers for all the observations that are in the dataframe at this point 
+*Pipe 7*: spread takes the category "drug_type" and provides whether it's true or false that it has drugs (the true or false statements given by has_drug). Fill = FALSE fills any observations that do not have has_drug = TRUE, with "FALSE"
+*Pipe 8*: once the remainder of the observations are accounted for in regards to the has_drug result (TRUE or FALSE), by reference of row number, the row_num column can be removed using select (-row_num)
+
+```{r}
+# 17. Join this back into the full dataset. (Write a sentence or two for each
+  # step in this pipe chain.)
+  df <- df %>%
+    dplyr::select(-contains("drugres")) %>%
+    dplyr::full_join(non_missing_drugs, by = "unique_id") %>%
+    dplyr::select(-None) %>%
+    tidyr::gather(drug_type, positive_for_drug, Alcohol, Cannabinoid,
+                  Depressant, Narcotic, Other, Stimulant) %>%
+    dplyr::mutate(drug_type = factor(drug_type)) %>%
+    unique()
+  return(df)
+```
+
+Comment #17: 
+*Pipe 1*: This redefines the df dataframe 
+*Pipe 2*: The df dataframe still has the "drug_res" columns because the gathered_df dataframe is the one that contains the gathered version of those variables. This step is selecting to remove those variables. 
+*Pipe 3*: The full_join function puts together all variables from each dataset that is being joined (df and non_missing_drugs, in this case are the two that are being joined). These dataframes are joined by a common variable, "unique_id". 
+*Pipe 4*: This selects out the variable called "None" from the dataframe
+*Pipe 5*: This step gathers the drug types(i.e.alcohol, cannabinoid, depressant, narcotics, other, stimulants) into the drug_type column - key argument = drug_type. It also presents the column, "positive_for_drug" which gives TRUE/FALSE for the drug_type - value argument =  positive_for_drug. 
+*Pipe 6*: The mutate function changes the drug_type variable into a factor/level like we did earlier with the sex (male/female). 
+
+unique() prints out the unique values that can be found within a variable. 
+return(df) prints out the complete, cleaned dataframe after the function created is run. 
+
+```{r}
+}
+# 18. Iterate the clean_yearly_person_file function across study years to
+# create and save a single dataset.
+# Note: map_df() is similar to map(), but it binds elements of the
+# list resulting from map() together. To understand this step, try
+# running this code with map instead of map_df, check out documentation
+# for map and map_df, and look at the map_df() function by typing
+# `map_df` in your console.
+clean_fars <- map_df(1999:2010, clean_yearly_person_file)
+save(clean_fars, file = "data/clean_fars.RData")
+```
+
+Comment #18: The } marks the close of the function that was created for which the code above will run. By running map_df(1999:2010, clean_yearly_person_file), we are reiterating this function for every person_year file that was uploaded from 1999-2010. This cleans each year's dataset the same way and joins them all together in the end. The clean_fars object is defined, which is the output of this function iterated across all the .csv files uploaded for this analysis. The clean_fars object that is defined is the compilation of all the datasets and in a format cleaned for further use. The save function here saves this clean_fars file into the data folder (instead of the data_raw folder within the project). 
+
+
