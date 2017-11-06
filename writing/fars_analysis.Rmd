@@ -19,8 +19,10 @@ library(ggthemes)
 library(knitr)
 library(purrr)
 library(tidyverse)
+library(tibble)
 
 load("../data/clean_fars.RData")
+source("../R/fars_functions.R")
 ```
 
 ##Results 
@@ -28,6 +30,7 @@ load("../data/clean_fars.RData")
 ###Percentages of drivers testing positive by drug type, sex, and year group
 
 ```{r}
+#table 1 
 clean_fars %>% 
   mutate(year_cat = cut(year, breaks = c(1999, 2002, 2006, 2010),
                         labels = c("1999-2002","2003-2006",
@@ -127,62 +130,30 @@ plot_figure_three
 ```
 
 ###Prevalence of drugs in fatally injured drivers for 1999 and 2010 by drug type
-```{r}
-#function 1
-perc_cis <- function(x, n) {
-  p <- x / n
-  standard_error <- sqrt((p * (1 - p)) / n)
-  upper_ci <- (p + (1.96 * standard_error))
-  lower_ci <- (p - (1.96 * standard_error))
-  p_perc <- round((p * 100), digits = 1)
-  upper_ci_perc <- round((upper_ci * 100), digits = 1)
-  lower_ci_perc <- round((lower_ci * 100), digits = 1)
-  final_results <- paste0(p_perc, "% (", lower_ci_perc, 
-                          "%, ", upper_ci_perc, "%)")
-  final_results
-}
-```
 
 ```{r}
 #table 2
-clean_fars %>% 
+prev_table_one <- clean_fars %>% 
   filter(year %in% c("1999","2010")) %>% 
   group_by(year, drug_type) %>% 
   summarize(positive = sum(positive_for_drug, na.rm = TRUE), trials = sum(!is.na(positive_for_drug)))
+
+prev_table_two <- data.frame(prevalence = perc_cis(x = prev_table_one$positive, n = prev_table_one$trials))
+
+prev_table_one <- rowid_to_column(as.data.frame(prev_table_one, var = "rowid"))
+prev_table_two <- rowid_to_column(as.data.frame(prev_table_two, var = "rowid"))
+
+prev_table <- prev_table_one %>% 
+  full_join(prev_table_two, by = "rowid") %>% 
+  select(prevalence, drug_type, year) %>% 
+  spread(key = year, value = prevalence) %>% 
+  rename("Drug type" = drug_type)
+
+kable(prev_table) 
 ```
 
 
 ##Statistics for testing for trend in prevalence of drugs over study years by drug type using Cochran-Armitage trend test
-
-```{r}
-#function 2
-test_trend_ca <- function(drug, data = clean_fars) {
-  if(drug == "Nonalcohol"){
-    to_test <- clean_fars %>%
-      filter(drug_type != "Alcohol") %>%
-      group_by(unique_id, year) %>% 
-      summarize(positive_test = sum(positive_for_drug, na.rm = TRUE), 
-                positive = any(positive_test > 0),
-                total_tests = length(!is.na(positive_for_drug))) %>% 
-      ungroup() %>% 
-      group_by(year) %>%
-      summarize(total_tests = sum(total_tests), positive = sum(positive)) 
-  } else{
-    to_test <- clean_fars %>%
-      filter(drug_type == drug) %>%
-      group_by(year) %>%
-      summarize(positive = sum(positive_for_drug, na.rm = TRUE),
-                total_tests = sum(!is.na(positive_for_drug)))
-  }
-  ca_alcohol <- prop.trend.test(x = to_test$positive,
-                                n = to_test$total_tests)
-  Z <- round(sqrt(ca_alcohol$statistic), digits = 1)
-  p.value <- round(ca_alcohol$p.value, digits = 3)
-  final_results <- data.frame(Z, p.value)
-  tibble::remove_rownames(final_results)
-  return(final_results)
-}
-```
 
 ```{r}
 #table 3
@@ -198,31 +169,7 @@ drug_trend_tests_ca %>% knitr::kable()
 ###Statistics for testing for trend in prevalence of drugs over study years by drug type using Wald test of logistic regression coefficient for "year"
 
 ```{r}
-test_trend_log_reg <- function(drug, data = clean_fars) {
-  if(drug == "Nonalcohol"){
-    to_test <- clean_fars %>%
-      filter(!is.na(drug_type)) %>% 
-      filter(drug_type != "Alcohol") %>% 
-      group_by(unique_id, year) %>% 
-      summarize(positive_for_drug = any(positive_for_drug))
-    
-  } else{
-    to_test <- clean_fars %>%
-      filter(!is.na(drug_type)) %>%
-      filter(drug_type == drug)
-  }
-  log_reg <- glm(positive_for_drug ~ year, data = to_test,
-                 family = binomial(link = "logit"))
-  log_reg_sum <- slice(broom::tidy(log_reg), 2)
-  Z <- round(log_reg_sum$statistic, digits = 1)
-  p.value <- round(log_reg_sum$p.value, digits = 3)
-  final_results <- data.frame(Z, p.value)
-  tibble::remove_rownames(final_results) 
-  return(final_results)
-}
-```
-
-```{r}
+#table 4
 drug_list <- c("Alcohol", "Nonalcohol", "Narcotic", "Depressant",
 "Stimulant", "Cannabinoid", "Other")
 drug_trend_tests_log_reg <- lapply(drug_list, test_trend_log_reg)
