@@ -1,10 +1,10 @@
 ---
 title: "Reproduced analysis of FARS data"
 author: "Marialexia Alfano"
-date: "November 4, 2017"
+date: "November 8, 2017"
 output:
-  pdf_document: default
   word_document: default
+  pdf_document: default
 ---
 
 ```{r setup, include=FALSE, warning=FALSE, message=FALSE}
